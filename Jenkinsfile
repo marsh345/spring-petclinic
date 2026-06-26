@@ -33,22 +33,32 @@ pipeline {
         stage('Dynamic Security Analysis (ZAP)') {
             steps {
                 // 1. Start the compiled app in the background on port 8082
-                // We save its Process ID (PID) to a file so we can kill it later
                 sh 'nohup java -jar target/spring-petclinic-*.jar --server.port=8082 > petclinic.log 2>&1 & echo $! > app.pid'
 
-                // 2. Wait 45 seconds to ensure Spring Boot is fully running before scanning
-                sh 'sleep 45'
+                // 2. Smart Wait: Actively poll the app until it returns a 200 OK response (max wait 2 minutes)
+                sh '''
+                    echo "Waiting for Spring Petclinic to boot up (this can take 30-90 seconds)..."
+                    timeout 120 bash -c 'while [[ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/)" != "200" ]]; do sleep 5; done' || echo "Timeout reached, continuing anyway..."
+                '''
 
-                // 3. Trigger ZAP to spider (crawl) the running application
-                // We use -H "Host: localhost" to spoof the header and bypass ZAP's DNS Rebinding protection
-                sh 'curl -v -H "Host: localhost" "http://zap:8081/JSON/spider/action/scan/?url=http://jenkins:8082"'
-
-                // 4. Wait 30 seconds for ZAP to finish crawling and passively scanning
-                sh 'sleep 30'
-
-                // 5. Ask ZAP to generate the HTML report and save it locally in the workspace
-                // We must spoof the Host header here as well
-                sh 'curl -v -H "Host: localhost" "http://zap:8081/OTHER/core/other/htmlreport/" -o zap-report.html'
+                // 3. Trigger ZAP using dynamic IPs to bypass DNS restrictions natively
+                sh '''
+                    # Fetch internal container IPs
+                    ZAP_IP=$(getent hosts zap_server | awk '{ print $1 }')
+                    JENKINS_IP=$(hostname -i | awk '{ print $1 }')
+                    
+                    echo "Resolved ZAP IP: $ZAP_IP"
+                    echo "Resolved Jenkins IP: $JENKINS_IP"
+                    
+                    # Trigger ZAP to spider the application using IPs instead of hostnames
+                    curl -v "http://${ZAP_IP}:8081/JSON/spider/action/scan/?url=http://${JENKINS_IP}:8082"
+                    
+                    # Wait 30 seconds for ZAP to finish crawling and passively scanning
+                    sleep 30
+                    
+                    # Generate the HTML report
+                    curl -v "http://${ZAP_IP}:8081/OTHER/core/other/htmlreport/" -o zap-report.html
+                '''
             }
         }
     }
