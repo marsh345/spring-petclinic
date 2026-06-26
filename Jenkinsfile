@@ -40,15 +40,15 @@ pipeline {
                 sh 'sleep 45'
 
                 // 3. Trigger ZAP to spider (crawl) the running application
-                // We use the service names 'zap' and 'jenkins' to avoid underscore DNS issues
-                // We added -v (verbose) to get better error logs if it fails
-                sh 'curl -v "http://zap:8081/JSON/spider/action/scan/?url=http://jenkins:8082"'
+                // We use -H "Host: localhost" to spoof the header and bypass ZAP's DNS Rebinding protection
+                sh 'curl -v -H "Host: localhost" "http://zap:8081/JSON/spider/action/scan/?url=http://jenkins:8082"'
 
                 // 4. Wait 30 seconds for ZAP to finish crawling and passively scanning
                 sh 'sleep 30'
 
                 // 5. Ask ZAP to generate the HTML report and save it locally in the workspace
-                sh 'curl -v "http://zap:8081/OTHER/core/other/htmlreport/" -o zap-report.html'
+                // We must spoof the Host header here as well
+                sh 'curl -v -H "Host: localhost" "http://zap:8081/OTHER/core/other/htmlreport/" -o zap-report.html'
             }
         }
     }
