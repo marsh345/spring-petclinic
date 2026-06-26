@@ -46,7 +46,8 @@ pipeline {
                 sh '''
                     echo "Wiping ZAP's memory (creating a new session) to remove old failed scan data..."
                     # ZAP runs as a persistent daemon. This clears out all the old errors from previous failed pipeline attempts!
-                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/core/action/newSession/?name=CleanSession&overwrite=true" > /dev/null
+                    # We add || true because ZAP drops the HTTP connection for a split second when resetting its database.
+                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/core/action/newSession/?name=CleanSession&overwrite=true" > /dev/null || true
                     
                     echo "Routing a test request through ZAP to trigger Passive Scanning..."
                     # We curl the app THROUGH the ZAP proxy using the clean docker-compose service name.
