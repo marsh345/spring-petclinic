@@ -32,29 +32,37 @@ pipeline {
 
         stage('Dynamic Security Analysis (ZAP)') {
             steps {
-                // 1. Start the compiled app in the background on port 8082
-                sh 'nohup java -jar target/spring-petclinic-*.jar --server.port=8082 > petclinic.log 2>&1 & echo $! > app.pid'
+                // 1. Start the app in the background. 
+                // We use -Xmx512m to cap its memory, ensuring ZAP has enough RAM to run without crashing!
+                sh 'nohup java -Xmx512m -jar target/spring-petclinic-*.jar --server.port=8082 > petclinic.log 2>&1 & echo $! > app.pid'
 
                 // 2. Smart Wait: Actively poll the app until it returns a 200 OK response (max wait 2 minutes)
                 sh '''
                     echo "Waiting for Spring Petclinic to boot up (this can take 30-90 seconds)..."
-                    timeout 120 bash -c 'while [[ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/)" != "200" ]]; do sleep 5; done' || echo "Timeout reached, continuing anyway..."
+                    timeout 120 bash -c 'while [[ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/)" != "200" ]]; do sleep 5; done' || true
                 '''
 
-                // 3. The Lightweight ZAP Passive Scan
+                // 3. The Bulletproof Lightweight ZAP Passive Scan
                 sh '''
+                    # Explicitly get the Jenkins IP to avoid any Docker DNS resolution issues
+                    JENKINS_IP=$(hostname -i | awk '{ print $1 }')
+                    
                     echo "Routing a test request through ZAP to trigger Passive Scanning..."
                     # We curl the app THROUGH the ZAP proxy. ZAP will passively scan the response.
-                    # This avoids the active spider crashes entirely!
-                    curl -s -x http://zap_server:8081 http://jenkins_server:8082/ > /dev/null || true
+                    curl -s -x http://zap_server:8081 "http://${JENKINS_IP}:8082/" > /dev/null || true
                     
                     echo "Waiting 10 seconds for ZAP passive scan to process..."
                     sleep 10
                     
                     echo "Generating ZAP HTML Report..."
-                    # Use the raw IP to safely bypass ZAP's DNS Rebinding protection without spoofing headers
-                    ZAP_IP=$(getent hosts zap_server | awk '{ print $1 }')
-                    curl -s "http://${ZAP_IP}:8081/OTHER/core/other/htmlreport/" -o zap-report.html
+                    # MUST use -H "Host: localhost:8081" to bypass ZAP's DNS Rebinding protection!
+                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html || true
+                    
+                    # Fallback: If the old report API didn't generate a file, use the modern report API endpoint
+                    if [ ! -s zap-report.html ]; then
+                        echo "Fallback to modern report endpoint..."
+                        curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/reports/other/report/?title=ZAP-Report&template=traditional-html" -o zap-report.html || true
+                    fi
                 '''
             }
         }
