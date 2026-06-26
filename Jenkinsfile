@@ -44,15 +44,15 @@ pipeline {
                 // 3. The Bulletproof ZAP API Call
                 sh '''
                     echo "Triggering ZAP Spider..."
-                    # By passing the request THROUGH ZAP as a proxy (-x) and calling the magical 'http://zap/' internal domain, 
-                    # we completely bypass all DNS Rebinding security checks and avoid poisoning the scanner's target list.
-                    curl -s -x http://zap_server:8081 "http://zap/JSON/spider/action/scan/?url=http://jenkins_server:8082/"
+                    # We spoof the Host header as localhost:8081 to bypass DNS Rebinding protection.
+                    # Including the :8081 port is CRITICAL, otherwise ZAP thinks it's a proxy request for port 80 and crashes!
+                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/spider/action/scan/?url=http://jenkins_server:8082/"
                     
                     echo "ZAP is scanning... waiting 30 seconds..."
                     sleep 30
                     
                     echo "Generating ZAP HTML Report..."
-                    curl -s -x http://zap_server:8081 "http://zap/OTHER/core/other/htmlreport/" -o zap-report.html
+                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html
                 '''
             }
         }
