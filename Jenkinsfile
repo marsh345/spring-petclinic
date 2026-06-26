@@ -40,17 +40,15 @@ pipeline {
                 sh 'sleep 45'
 
                 // 3. Trigger ZAP to spider (crawl) the running application
-                // We use the container name 'jenkins_server' so ZAP knows where to look on the network
-                sh 'curl -s "http://zap_server:8081/JSON/spider/action/scan/?url=http://jenkins_server:8082"'
+                // We use the service names 'zap' and 'jenkins' to avoid underscore DNS issues
+                // We added -v (verbose) to get better error logs if it fails
+                sh 'curl -v "http://zap:8081/JSON/spider/action/scan/?url=http://jenkins:8082"'
 
                 // 4. Wait 30 seconds for ZAP to finish crawling and passively scanning
                 sh 'sleep 30'
 
                 // 5. Ask ZAP to generate the HTML report and save it locally in the workspace
-                sh 'curl -s "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html'
-
-                // 6. Shut down the background Spring Boot application so it doesn't run forever
-                sh 'kill $(cat app.pid) || true'
+                sh 'curl -v "http://zap:8081/OTHER/core/other/htmlreport/" -o zap-report.html'
             }
         }
     }
@@ -61,6 +59,9 @@ pipeline {
             // Fulfills the requirement: "Add post-build actions to publish reports for ZAP"
             // This saves the report so you can download it directly from the Jenkins UI
             archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true
+            
+            // Clean up the background app if it's running, even if the build failed above
+            sh 'kill $(cat app.pid) || true'
         }
     }
 }
