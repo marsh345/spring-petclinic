@@ -44,24 +44,26 @@ pipeline {
 
                 // 3. The Bulletproof Lightweight ZAP Passive Scan
                 sh '''
-                    # Explicitly get the Jenkins IP to avoid any Docker DNS resolution issues
-                    JENKINS_IP=$(hostname -i | awk '{ print $1 }')
+                    echo "Wiping ZAP's memory (creating a new session) to remove old failed scan data..."
+                    # ZAP runs as a persistent daemon. This clears out all the old errors from previous failed pipeline attempts!
+                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/core/action/newSession/?name=CleanSession&overwrite=true" > /dev/null
                     
                     echo "Routing a test request through ZAP to trigger Passive Scanning..."
-                    # We curl the app THROUGH the ZAP proxy. ZAP will passively scan the response.
-                    curl -s -x http://zap_server:8081 "http://${JENKINS_IP}:8082/" > /dev/null || true
+                    # We curl the app THROUGH the ZAP proxy using the clean docker-compose service name.
+                    curl -s -x http://zap_server:8081 "http://jenkins_server:8082/" > /dev/null || true
                     
                     echo "Waiting 10 seconds for ZAP passive scan to process..."
                     sleep 10
                     
                     echo "Generating ZAP HTML Report..."
+                    # Use the modern report API which handles formatting beautifully
                     # MUST use -H "Host: localhost:8081" to bypass ZAP's DNS Rebinding protection!
-                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html || true
+                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/reports/other/report/?title=ZAP-Report&template=traditional-html" -o zap-report.html || true
                     
-                    # Fallback: If the old report API didn't generate a file, use the modern report API endpoint
+                    # Fallback: If the modern report API didn't generate a file, use the old core endpoint
                     if [ ! -s zap-report.html ]; then
-                        echo "Fallback to modern report endpoint..."
-                        curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/reports/other/report/?title=ZAP-Report&template=traditional-html" -o zap-report.html || true
+                        echo "Fallback to legacy report endpoint..."
+                        curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html || true
                     fi
                 '''
             }
