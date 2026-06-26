@@ -32,6 +32,9 @@ pipeline {
 
         stage('Dynamic Security Analysis (ZAP)') {
             steps {
+                // 0. Remove any old report from the workspace to ensure we don't accidentally archive a stale file
+                sh 'rm -f zap-report.html'
+
                 // 1. Start the app in the background. 
                 // We use -Xmx512m to cap its memory, ensuring ZAP has enough RAM to run without crashing!
                 sh 'nohup java -Xmx512m -jar target/spring-petclinic-*.jar --server.port=8082 > petclinic.log 2>&1 & echo $! > app.pid'
@@ -45,13 +48,16 @@ pipeline {
                 // 3. The Bulletproof Lightweight ZAP Passive Scan
                 sh '''
                     echo "Wiping ZAP's memory (creating a new session) to remove old failed scan data..."
-                    # ZAP runs as a persistent daemon. This clears out all the old errors from previous failed pipeline attempts!
-                    # We add || true because ZAP drops the HTTP connection for a split second when resetting its database.
                     curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/core/action/newSession/?name=CleanSession&overwrite=true" > /dev/null || true
                     
-                    echo "Routing a test request through ZAP to trigger Passive Scanning..."
-                    # We curl the app THROUGH the ZAP proxy using the clean docker-compose service name.
-                    curl -s -x http://zap_server:8081 "http://jenkins_server:8082/" > /dev/null || true
+                    # Fetch internal container IP for Jenkins to bypass Java URI parsing bugs
+                    JENKINS_IP=$(hostname -i | awk '{ print $1 }')
+                    
+                    echo "Routing a test request through ZAP to trigger Passive Scanning on IP: ${JENKINS_IP}..."
+                    # We curl the app THROUGH the ZAP proxy using the RAW IP!
+                    # Java (and thus ZAP) fails to parse URIs with underscores (like jenkins_server) and defaults to localhost:80.
+                    # Using the raw IP completely bypasses this Java bug.
+                    curl -s -x http://zap_server:8081 "http://${JENKINS_IP}:8082/" > /dev/null || true
                     
                     echo "Waiting 10 seconds for ZAP passive scan to process..."
                     sleep 10
