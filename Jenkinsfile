@@ -48,30 +48,25 @@ pipeline {
                 // 3. The Bulletproof Lightweight ZAP Passive Scan
                 sh '''
                     echo "Wiping ZAP's memory (creating a new session) to remove old failed scan data..."
-                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/core/action/newSession/?name=CleanSession&overwrite=true" > /dev/null || true
+                    # Using ZAP as a proxy (-x) to access the special 'http://zap/' domain natively bypasses all DNS Rebinding security.
+                    curl -s -x http://zap_server:8081 "http://zap/JSON/core/action/newSession/?name=CleanSession&overwrite=true" > /dev/null || true
                     
                     # Fetch internal container IP for Jenkins to bypass Java URI parsing bugs
                     JENKINS_IP=$(hostname -i | awk '{ print $1 }')
                     
                     echo "Routing a test request through ZAP to trigger Passive Scanning on IP: ${JENKINS_IP}..."
                     # We curl the app THROUGH the ZAP proxy using the RAW IP!
-                    # Java (and thus ZAP) fails to parse URIs with underscores (like jenkins_server) and defaults to localhost:80.
-                    # Using the raw IP completely bypasses this Java bug.
                     curl -s -x http://zap_server:8081 "http://${JENKINS_IP}:8082/" > /dev/null || true
                     
-                    echo "Waiting 10 seconds for ZAP passive scan to process..."
-                    sleep 10
+                    echo "Waiting 15 seconds for ZAP passive scan to process..."
+                    sleep 15
                     
                     echo "Generating ZAP HTML Report..."
-                    # Use the modern report API which handles formatting beautifully
-                    # MUST use -H "Host: localhost:8081" to bypass ZAP's DNS Rebinding protection!
-                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/reports/other/report/?title=ZAP-Report&template=traditional-html" -o zap-report.html || true
+                    # Use the proxy method to safely download the legacy core HTML report
+                    curl -s -x http://zap_server:8081 "http://zap/OTHER/core/other/htmlreport/" -o zap-report.html || true
                     
-                    # Fallback: If the modern report API didn't generate a file, use the old core endpoint
-                    if [ ! -s zap-report.html ]; then
-                        echo "Fallback to legacy report endpoint..."
-                        curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html || true
-                    fi
+                    # Safety Net: Ensure the file exists so Jenkins doesn't crash during archiveArtifacts even if the API fails
+                    touch zap-report.html
                 '''
             }
         }
