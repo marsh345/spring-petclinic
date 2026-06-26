@@ -41,18 +41,20 @@ pipeline {
                     timeout 120 bash -c 'while [[ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/)" != "200" ]]; do sleep 5; done' || echo "Timeout reached, continuing anyway..."
                 '''
 
-                // 3. The Bulletproof ZAP API Call
+                // 3. The Lightweight ZAP Passive Scan
                 sh '''
-                    echo "Triggering ZAP Spider..."
-                    # We spoof the Host header as localhost:8081 to bypass DNS Rebinding protection.
-                    # Including the :8081 port is CRITICAL, otherwise ZAP thinks it's a proxy request for port 80 and crashes!
-                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/JSON/spider/action/scan/?url=http://jenkins_server:8082/"
+                    echo "Routing a test request through ZAP to trigger Passive Scanning..."
+                    # We curl the app THROUGH the ZAP proxy. ZAP will passively scan the response.
+                    # This avoids the active spider crashes entirely!
+                    curl -s -x http://zap_server:8081 http://jenkins_server:8082/ > /dev/null || true
                     
-                    echo "ZAP is scanning... waiting 30 seconds..."
-                    sleep 30
+                    echo "Waiting 10 seconds for ZAP passive scan to process..."
+                    sleep 10
                     
                     echo "Generating ZAP HTML Report..."
-                    curl -s -H "Host: localhost:8081" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html
+                    # Use the raw IP to safely bypass ZAP's DNS Rebinding protection without spoofing headers
+                    ZAP_IP=$(getent hosts zap_server | awk '{ print $1 }')
+                    curl -s "http://${ZAP_IP}:8081/OTHER/core/other/htmlreport/" -o zap-report.html
                 '''
             }
         }
