@@ -1,12 +1,6 @@
 pipeline {
     agent any
 
-    tools {
-        // We need to tell Jenkins to use Java 17, which Spring Petclinic requires.
-        // We will configure this tool name ('jdk17') in Jenkins shortly.
-        jdk 'jdk17' 
-    }
-
     stages {
         stage('Checkout') {
             steps {
