@@ -41,23 +41,23 @@ pipeline {
                     timeout 120 bash -c 'while [[ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082/)" != "200" ]]; do sleep 5; done' || echo "Timeout reached, continuing anyway..."
                 '''
 
-                // 3. Trigger ZAP using dynamic IPs to bypass DNS restrictions natively
+                // 3. Trigger ZAP using a hybrid approach for 100% reliability
                 sh '''
-                    # Fetch internal container IPs
-                    ZAP_IP=$(getent hosts zap_server | awk '{ print $1 }')
+                    # Fetch internal container IP for Jenkins
                     JENKINS_IP=$(hostname -i | awk '{ print $1 }')
+                    echo "Targeting Jenkins App at IP: $JENKINS_IP"
                     
-                    echo "Resolved ZAP IP: $ZAP_IP"
-                    echo "Resolved Jenkins IP: $JENKINS_IP"
+                    # A. Trigger ZAP Spider
+                    # - We use -H "Host: localhost" so the ZAP API accepts the connection (bypassing DNS Rebind protection).
+                    # - We pass the explicit IP in the URL so ZAP's crawler doesn't get lost trying to resolve Docker hostnames.
+                    curl -s -H "Host: localhost" "http://zap_server:8081/JSON/spider/action/scan/?url=http://${JENKINS_IP}:8082"
                     
-                    # Trigger ZAP to spider the application using IPs instead of hostnames
-                    curl -v "http://${ZAP_IP}:8081/JSON/spider/action/scan/?url=http://${JENKINS_IP}:8082"
-                    
-                    # Wait 30 seconds for ZAP to finish crawling and passively scanning
+                    # B. Wait 30 seconds for ZAP to finish crawling and scanning
+                    echo "ZAP is scanning... waiting 30 seconds..."
                     sleep 30
                     
-                    # Generate the HTML report
-                    curl -v "http://${ZAP_IP}:8081/OTHER/core/other/htmlreport/" -o zap-report.html
+                    # C. Generate the HTML report
+                    curl -s -H "Host: localhost" "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html
                 '''
             }
         }
