@@ -29,5 +29,38 @@ pipeline {
                 }
             }
         }
+
+        stage('Dynamic Security Analysis (ZAP)') {
+            steps {
+                // 1. Start the compiled app in the background on port 8082
+                // We save its Process ID (PID) to a file so we can kill it later
+                sh 'nohup java -jar target/spring-petclinic-*.jar --server.port=8082 > petclinic.log 2>&1 & echo $! > app.pid'
+
+                // 2. Wait 45 seconds to ensure Spring Boot is fully running before scanning
+                sh 'sleep 45'
+
+                // 3. Trigger ZAP to spider (crawl) the running application
+                // We use the container name 'jenkins_server' so ZAP knows where to look on the network
+                sh 'curl -s "http://zap_server:8081/JSON/spider/action/scan/?url=http://jenkins_server:8082"'
+
+                // 4. Wait 30 seconds for ZAP to finish crawling and passively scanning
+                sh 'sleep 30'
+
+                // 5. Ask ZAP to generate the HTML report and save it locally in the workspace
+                sh 'curl -s "http://zap_server:8081/OTHER/core/other/htmlreport/" -o zap-report.html'
+
+                // 6. Shut down the background Spring Boot application so it doesn't run forever
+                sh 'kill $(cat app.pid) || true'
+            }
+        }
+    }
+
+    // The post section runs after all stages are complete (or if they fail)
+    post {
+        always {
+            // Fulfills the requirement: "Add post-build actions to publish reports for ZAP"
+            // This saves the report so you can download it directly from the Jenkins UI
+            archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true
+        }
     }
 }
